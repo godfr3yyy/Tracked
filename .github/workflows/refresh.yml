@@ -1,0 +1,42 @@
+name: Refresh dashboard
+
+on:
+  schedule:
+    - cron: "0 6 * * *"      # daily, 06:00 UTC: logs predictions before kickoff, scores finished matches
+  workflow_dispatch:          # manual "Run workflow" button
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Rebuild predictions + dashboard
+        run: python run.py dashboard
+
+      - name: Commit changes
+        run: |
+          git config user.name "epl-predictor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/index.html predictions/log.csv data/injuries
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Refresh dashboard $(date -u +'%Y-%m-%d')"
+            git push
+          fi
