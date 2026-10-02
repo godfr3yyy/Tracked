@@ -8,7 +8,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from . import data, features, model
+from . import data, features, model, value
 
 TEMPLATE = data.ROOT / "src" / "dashboard_template.html"
 OUT = data.ROOT / "docs" / "index.html"
@@ -68,6 +68,27 @@ def build_payload(log_path) -> dict:
         if m.sum() >= 30:
             calib.append({"p": float(pooled_p[m].mean()), "freq": float(pooled_y[m].mean()), "n": int(m.sum())})
 
+    # ---- betting-edge test (value-bet backtest vs bookmaker odds)
+    d = value.prep(bt)
+    edge_rows = []
+    for label, price, w, th in [("Model · market-average odds · any value", "avg", 1.0, 0.0),
+                                ("Model · best odds · edge > 4%", "best", 1.0, 0.04),
+                                ("50/50 blend with market · best odds · edge > 2%", "best", 0.5, 0.02)]:
+        mask, profit = value.bets(d, w, th, price)
+        edge_rows.append({"label": label, **value.summarize(mask, profit)})
+    exp_path = data.ROOT / "predictions" / "experiment.csv"
+    if exp_path.exists():
+        ex = pd.read_csv(exp_path).set_index("variant")
+        for v, label in [("+ xG (2016+)", "Model + xG · best odds · edge > 4%"),
+                         ("+ xG + availability (2016+)", "Model + xG + player availability · best odds · edge > 4%")]:
+            if v in ex.index:
+                r = ex.loc[v]
+                edge_rows.append({"label": label, "bets": int(r.bets), "roi": float(r.roi), "lo": float(r.lo), "hi": float(r.hi)})
+    margin = float((1 / d["avg"]).sum(1).mean() - 1)
+    market_ll = model.score(d["df"].FTR, d["market"])["log_loss"]
+    model_ll = model.score(d["df"].FTR, d["model"])["log_loss"]
+    edge = {"rows": edge_rows, "margin": margin, "market_ll": market_ll, "model_ll": model_ll}
+
     # ---- upcoming + live tracker from the prediction log
     upcoming, live = [], {"n": 0, "blend_acc": None, "market_acc": None, "rows": [], "recent": []}
     if log_path.exists():
@@ -110,7 +131,7 @@ def build_payload(log_path) -> dict:
                      "market": acc(bt, "market"), "base": base_acc, "n": int(len(bt)),
                      "range": f"{_label(tests[0])} – {_label(tests[-1])}"},
         "seasons": seasons, "stages": stages, "calib": calib,
-        "upcoming": upcoming, "live": live, "elo": elo,
+        "upcoming": upcoming, "live": live, "elo": elo, "edge": edge,
     })
 
 

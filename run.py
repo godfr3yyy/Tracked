@@ -3,6 +3,7 @@
   python run.py backtest   walk-forward test on past seasons vs. bookmaker odds + naive baselines
   python run.py predict    refresh data, retrain, predict next gameweek, log predictions
   python run.py dashboard  refresh + predict + rebuild docs/index.html
+  python run.py value      does the model beat bookmaker odds? (value-bet backtest)
   python run.py evaluate   score logged predictions against real results (accuracy over the season)
 """
 from __future__ import annotations
@@ -103,6 +104,69 @@ def cmd_evaluate():
     print("\nRunning accuracy (blend):", f"{j.running_acc.iloc[-1]:.1%} over {len(j)} matches")
 
 
+def cmd_value():
+    from src import value
+    matches = data.load_matches()
+    feat, _ = features.build(matches)
+    done = [s for s in sorted(feat.season.unique()) if (feat.season == s).sum() >= 370]
+    tests = done[-5:]
+    d = value.prep(model.walk_forward(feat, tests))
+    pd.set_option("display.width", 160)
+    n = len(d["df"])
+    print(f"{n} matches with full odds, seasons {tests[0]}-{tests[-1]}. Flat 1-unit stakes. ROI = profit / stakes.\n")
+    full = value.grid(d)
+    fmt = lambda df: df.assign(roi=(df.roi * 100).round(1), lo=(df.lo * 100).round(1), hi=(df.hi * 100).round(1)).rename(columns={"roi": "ROI%", "lo": "ci_lo%", "hi": "ci_hi%"})
+    for price in ["avg", "best"]:
+        print(f"=== priced at {'MARKET-AVERAGE' if price == 'avg' else 'BEST-AVAILABLE'} odds (all 5 seasons) ===")
+        t = full[full.price == price].pivot(index="w_model", columns="edge>", values="roi") * 100
+        print(t.round(1).to_string(), "\n")
+    # honest check: pick the rule on the first 3 test seasons, judge it on the last 2
+    sea = d["season"]
+    sel, hold = np.isin(sea, tests[:3]), np.isin(sea, tests[3:])
+    sg = value.grid(d, sel)
+    sg = sg[sg.bets >= 100].sort_values("roi", ascending=False)
+    print("=== choose-then-test: best rule on first 3 seasons -> result on last 2 (unseen) ===")
+    for _, r in sg.head(3).iterrows():
+        mask, profit = value.bets(d, r["w_model"], r["edge>"], r["price"], hold)
+        res = value.summarize(mask, profit)
+        print(f"rule {r['price']} w={r['w_model']} edge>{r['edge>']:.0%}: chosen-set ROI {r.roi:+.1%} ({int(r.bets)} bets)  ->  holdout ROI {res['roi']:+.1%} on {res['bets']} bets, 95% range {res['lo']:+.1%}..{res['hi']:+.1%}")
+    full.to_csv(data.ROOT / "predictions" / "value_grid.csv", index=False)
+
+
+def cmd_experiment():
+    """Do extra signals (xG, availability) improve accuracy AND turn the value-bet ROI positive?"""
+    from src import extra, value
+    matches = data.load_matches()
+    feat, _ = features.build(matches)
+    f = extra.add_extra(feat, extra.load_xg(), extra.load_availability())
+    done = [s for s in sorted(f.season.unique()) if (f.season == s).sum() >= 370]
+    tests = done[-5:]
+    B, X, A = features.FEATURES, extra.XG_FEATURES, extra.AVAIL_FEATURES
+    variants = {"baseline (all history)": (B, 0), "baseline (2016+ only)": (B, 2016),
+                "+ xG (2016+)": (B + X, 2016), "+ xG + availability (2016+)": (B + X + A, 2016)}
+    rules = [("best", 1.0, 0.04), ("best", 0.5, 0.02), ("best", 1.0, 0.0)]
+    rows = []
+    for name, (cols, frm) in variants.items():
+        bt = model.walk_forward(f, tests, cols, frm)
+        d = value.prep(bt)
+        y = d["df"].FTR
+        sc = model.score(y, d["model"])
+        mk = model.score(y, d["market"])
+        row = {"variant": name, "n": sc["n"], "acc": sc["accuracy"], "logloss": sc["log_loss"]}
+        for k, (price, w, th) in enumerate(rules):
+            mask, profit = value.bets(d, w, th, price)
+            r = value.summarize(mask, profit)
+            if k == 0:
+                row.update(roi=r["roi"], lo=r["lo"], hi=r["hi"], bets=r["bets"])
+            row[f"ROI best w={w} >{th:.0%}"] = f"{r['roi']:+.1%} ({r['bets']} bets, {r['lo']:+.0%}..{r['hi']:+.0%})"
+        rows.append(row)
+    pd.set_option("display.width", 250); pd.set_option("display.max_colwidth", 60)
+    out = pd.DataFrame(rows)
+    print(f"Test seasons {tests[0]}-{tests[-1]} (same matches for every variant). Bookmakers: acc {mk['accuracy']:.3f}  logloss {mk['log_loss']:.4f}\n")
+    print(out.round(4).to_string(index=False))
+    out.to_csv(data.ROOT / "predictions" / "experiment.csv", index=False)
+
+
 def cmd_dashboard():
     from src import dashboard
     cmd_predict()
@@ -110,5 +174,5 @@ def cmd_dashboard():
 
 
 if __name__ == "__main__":
-    {"backtest": cmd_backtest, "predict": cmd_predict, "evaluate": cmd_evaluate, "dashboard": cmd_dashboard}.get(
+    {"backtest": cmd_backtest, "predict": cmd_predict, "evaluate": cmd_evaluate, "dashboard": cmd_dashboard, "value": cmd_value, "experiment": cmd_experiment}.get(
         sys.argv[1] if len(sys.argv) > 1 else "", lambda: print(__doc__))()

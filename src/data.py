@@ -20,7 +20,8 @@ FPL_TO_FD = {"Man Utd": "Man United", "Spurs": "Tottenham", "Coventry City": "Co
              "Hull City": "Hull", "Ipswich Town": "Ipswich"}
 
 KEEP = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR", "HS", "AS", "HST", "AST",
-        "B365H", "B365D", "B365A", "AvgH", "AvgD", "AvgA"]
+        "B365H", "B365D", "B365A", "AvgH", "AvgD", "AvgA",
+        "MaxH", "MaxD", "MaxA", "BbMxH", "BbMxD", "BbMxA"]
 
 
 def current_season_start(today: date | None = None) -> int:
@@ -67,6 +68,9 @@ def load_matches(refresh_current: bool = True) -> pd.DataFrame:
     # one set of odds columns: prefer market average, fall back to Bet365
     for o in "HDA":
         df[f"odds{o}"] = pd.to_numeric(df[f"Avg{o}"], errors="coerce").fillna(pd.to_numeric(df[f"B365{o}"], errors="coerce"))
+    # best price across bookmakers (older seasons call it BbMx*)
+    for o in "HDA":
+        df[f"best{o}"] = pd.to_numeric(df[f"Max{o}"], errors="coerce").fillna(pd.to_numeric(df[f"BbMx{o}"], errors="coerce"))
     return df.sort_values("Date", kind="stable").reset_index(drop=True)
 
 

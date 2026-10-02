@@ -27,16 +27,16 @@ def make_models() -> dict:
     }
 
 
-def fit_all(train: pd.DataFrame) -> dict:
+def fit_all(train: pd.DataFrame, cols: list = FEATURES) -> dict:
     y = train["FTR"].map(LABEL)
     models = make_models()
     for m in models.values():
-        m.fit(train[FEATURES], y)
+        m.fit(train[cols], y)
     return models
 
 
-def predict_proba(models: dict, X: pd.DataFrame) -> dict:
-    out = {n: m.predict_proba(X[FEATURES]) for n, m in models.items()}
+def predict_proba(models: dict, X: pd.DataFrame, cols: list = FEATURES) -> dict:
+    out = {n: m.predict_proba(X[cols]) for n, m in models.items()}
     out["blend"] = (out["logreg"] + out["xgboost"]) / 2
     return out
 
@@ -55,14 +55,14 @@ def score(y: pd.Series, p: np.ndarray) -> dict:
             "brier": float(((p - onehot) ** 2).sum(1).mean())}
 
 
-def walk_forward(feat: pd.DataFrame, test_seasons: list[int], min_train_seasons: int = 5):
+def walk_forward(feat: pd.DataFrame, test_seasons: list[int], cols: list = FEATURES, from_season: int = 0):
     """Retrain before each test season using only earlier seasons, then predict that season blind."""
     parts = []
     for s in test_seasons:
-        train, test = feat[feat.season < s], feat[feat.season == s].copy()
+        train, test = feat[(feat.season < s) & (feat.season >= from_season)], feat[feat.season == s].copy()
         train = train[train.season >= train.season.min() + 1]      # first season has no history -> noisy
-        models = fit_all(train)
-        for name, p in predict_proba(models, test).items():
+        models = fit_all(train, cols)
+        for name, p in predict_proba(models, test, cols).items():
             test[[f"p_{name}_{c}" for c in CLASSES]] = p
         parts.append(test)
     return pd.concat(parts, ignore_index=True)

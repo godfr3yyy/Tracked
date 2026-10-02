@@ -101,6 +101,12 @@ footer{margin-top:60px;color:var(--muted);font-size:13px;border-top:1px solid va
 </section>
 
 <section>
+  <h2>Is there a betting edge?</h2>
+  <p class="lede" id="edge-lede"></p>
+  <div class="panel" id="edge"></div>
+</section>
+
+<section>
   <div class="two">
     <div class="panel"><h3>Team strength (Elo)</h3><p class="cap">Rating after every result so far, with last five results.</p><div id="elo"></div></div>
     <div class="panel"><h3>Are the probabilities honest?</h3><p class="cap">When the model says 40%, it should happen about 40% of the time. Dots on the diagonal are well calibrated.</p><div id="calib"></div></div>
@@ -198,6 +204,23 @@ function liveSection(){
   $("liveChart").append(svg);
 }
 
+function edgeSection(){
+  const E=D.edge, lo=-0.30, hi=0.20, W=300, H=26, X=v=>(Math.max(lo,Math.min(hi,v))-lo)/(hi-lo)*W;
+  $("edge-lede").textContent=`Short answer: no. We flat-staked every outcome the model rated as value against real bookmaker odds, on ${D.headline.n.toLocaleString()} unseen matches. Bookmakers keep roughly a ${pct(E.margin,0)} margin, so just betting blindly loses about that. Every strategy below has a negative average return. The bars show the 95% range: for the best ones it just reaches break-even, which means luck can't be ruled out, but there is no evidence of a profit.`;
+  const row=r=>{
+    const ok=r.roi>0;
+    const svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:180px"><line x1="${X(0)}" x2="${X(0)}" y1="2" y2="${H-2}" stroke="${cs('--muted')}" stroke-dasharray="3 3"/><line x1="${X(r.lo)}" x2="${X(r.hi)}" y1="${H/2}" y2="${H/2}" stroke="${cs('--muted')}" stroke-width="3" stroke-linecap="round" opacity=".5"/><circle cx="${X(r.roi)}" cy="${H/2}" r="5.5" fill="${ok?cs('--good'):cs('--bad')}"/></svg>`;
+    return `<tr><td>${r.label}</td><td class="num">${r.bets.toLocaleString()}</td><td class="num ${ok?'ok':'no'}">${(r.roi>0?'+':'')+pct(r.roi,1)}</td><td style="width:36%">${svg}</td></tr>`;
+  };
+  $("edge").innerHTML=`<table><thead><tr><th>Strategy (flat stakes)</th><th class="num">Bets</th><th class="num">ROI</th><th>95% range &nbsp;<span style="text-transform:none;letter-spacing:0">−30% ← 0 → +20%</span></th></tr></thead><tbody>${E.rows.map(row).join("")}</tbody></table>
+  <ul class="m" style="margin-top:16px">
+    <li><b>Log loss</b> (lower is better): model ${E.model_ll.toFixed(3)} vs bookmakers ${E.market_ll.toFixed(3)}. The market is the better forecaster.</li>
+    <li><b>Best-price shopping</b> roughly halves the losses by cutting the margin, but doesn't flip them positive.</li>
+    <li><b>New signals tested:</b> expected goals adds about a point of accuracy; a player-availability proxy adds nothing measurable. Neither produces a profit.</li>
+    <li><b>So this dashboard shows no “bets”.</b> If a future model clears this test on unseen data, it will show up here first.</li>
+  </ul>`;
+}
+
 function eloTable(){
   const lo=Math.min(...D.elo.map(t=>t.elo))-20, hi=Math.max(...D.elo.map(t=>t.elo));
   $("elo").innerHTML=`<table><tbody>${D.elo.map((t,i)=>`<tr><td style="width:22px;color:var(--muted)">${i+1}</td><td>${t.team}</td>
@@ -220,7 +243,7 @@ function init(){
   stats(); upcoming();
   groupedBars($("stageChart"), D.stages, "label");
   groupedBars($("seasonChart"), D.seasons, "season");
-  liveSection(); eloTable(); calib();
+  liveSection(); edgeSection(); eloTable(); calib();
 }
 $("theme").onclick=()=>{
   const cur=document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");

@@ -89,7 +89,8 @@ def build(matches: pd.DataFrame) -> tuple[pd.DataFrame, State]:
         for i, r in enumerate(g.itertuples(index=False)):
             f = st.features(r.HomeTeam, r.AwayTeam, r.Date)
             f.update(season=season, Date=r.Date, HomeTeam=r.HomeTeam, AwayTeam=r.AwayTeam, FTR=r.FTR,
-                     oddsH=r.oddsH, oddsD=r.oddsD, oddsA=r.oddsA, matchno=i)
+                     oddsH=r.oddsH, oddsD=r.oddsD, oddsA=r.oddsA,
+                     bestH=r.bestH, bestD=r.bestD, bestA=r.bestA, matchno=i)
             rows.append(f)
             st.update(r)
     return pd.DataFrame(rows), st
